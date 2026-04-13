@@ -15,7 +15,8 @@ countries = db.countries
 #initialize csv data into database
 def import_csv(csv):
     yearly_trends.drop()
-    df = pd.read_csv(csv, sep='\t')
+    df = pd.read_csv(csv)
+    print(df.columns.tolist())
     df.columns = df.columns.str.strip()
     df['country'] = df['country'].str.strip()
     df['region'] = df['region'].str.strip()
@@ -159,3 +160,4 @@ def add_characteristic(filter_field, filter_val, new_field, char_value):
         {filter_field: filter_val},
         {'$set': {new_field: char_value}}
     )
+
