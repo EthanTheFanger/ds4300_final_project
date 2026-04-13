@@ -1,21 +1,28 @@
 import re
+import os
 import pandas as pd
 from pymongo import MongoClient
+from dotenv import load_dotenv
 
-client = MongoClient('mongodb://localhost:27017/')
-db = client['ted_global']
+load_dotenv()
 
-# trends, regions, countries
-yearly_trends = db.yearly_trends
-regions = db.regions
+# load in values from .env file
+client = MongoClient(os.getenv('MONGO_URI'))
+db = client[os.getenv('DB_NAME')]
+yearly_trends = db[os.getenv('COLLECTION1')]
 countries = db.countries
 
 #initialize csv data into database
 def import_csv(csv):
-    client.drop_database('ted_global')
-
-    df = pd.read_csv(csv)
+    yearly_trends.drop()
+    df = pd.read_csv(csv, sep='\t')
+    df.columns = df.columns.str.strip()
+    df['country'] = df['country'].str.strip()
+    df['region'] = df['region'].str.strip()
     yearly_trends.insert_many(df.to_dict(orient='records'))
+
+def define_outputs(fields):
+    return {field: 1 for field in fields} | {'_id': 0}
 
 def mongo_filter(filters):
     """
@@ -23,7 +30,7 @@ def mongo_filter(filters):
 
     Args:
         filters: list of tuples of filters as string that the user wants to ask, allows >, <, >=, <=, ==, and contains
-        e.g. [('artist', 'Kendrick Lamar'), ('energy', ('>', 50)), ('song', ('contains', 'love'))]
+        e.g. [('country', 'Japan'), ('real_gdp', ('>', 50000)), ('country', ('contains', 'can'))]
 
     Returns: filter as a dictionary in Mongo syntax.
     """
@@ -33,25 +40,28 @@ def mongo_filter(filters):
         filters = [filters]
 
     for field, condition in filters:
-        # case 1: simple equality
         if not isinstance(condition, tuple):
             output_filter[field] = condition
         else:
-            # condition is a tuple like ('>', 70) or ('contains', 'Love')
-            op, val= condition
+            op, val = condition
             if op == 'contains':
                 output_filter[field] = re.compile(val, re.IGNORECASE)
             else:
                 output_filter[field] = {operator_map[op]: val}
     return output_filter
 
-def find_songs(filters=None, fields=None, sort=None, num_songs=5):
+def find_records(filters=None, fields=None, sort=None, num_records=5):
     """
-    Find a song/songs by filter, output fields, sorts and number of songs.
+    Find records by filter, output fields, sort and number of records.
+
     Args:
-        filters: filters for querying in Python, for format see mongo_filter above
+        filters: filters for querying, for format see mongo_filter above
         fields: fields to include in output, for format see define_outputs above
-        sort (list of tuples): sorting order, e.g., [('popularity', -1), ('energy', -1)]
+        sort (list of tuples): sorting order, e.g., [('real_gdp', -1), ('year', -1)]
+        num_records (int): number of records to return
+
+    Example:
+        find_records([('country', 'Japan')], fields=['year', 'real_gdp'], sort=[('year', 1)])
     """
     if filters:
         filters = mongo_filter(filters)
@@ -63,34 +73,36 @@ def find_songs(filters=None, fields=None, sort=None, num_songs=5):
     else:
         outputs = {'_id': 0}
 
-    songs = db.songs.find(filters, outputs)
+    results = yearly_trends.find(filters, outputs)
 
     if sort:
         if not isinstance(sort, list):
             sort = [sort]
-        songs = songs.sort(sort)
+        results = results.sort(sort)
 
-    songs = songs.limit(num_songs)
+    results = results.limit(num_records)
 
-    for s in songs:
-        print(s)
+    for r in results:
+        print(r)
 
-def aggregate_songs(matches=None, group_by=None, metrics=None, sort=None, fields=None, num_songs=5):
+def aggregate_records(matches=None, group_by=None, metrics=None, sort=None, fields=None, num_records=5):
     """
-    Find songs using MongoDB aggregation.
+    Find records using MongoDB aggregation.
 
     Parameters:
         matches: matches to apply before aggregation, for format see mongo_filter above
-        group_by: field(s) to group by, e.g., 'artist' or ['artist', 'genre']
-        metrics (tuple): metrics to compute, e.g., [('avg', 'energy'), ('max', 'popularity')]
-        sort: sorting order after aggregation, e.g., [('avg_energy', -1)]
-        num_songs (int): number of results to return
+        group_by: field(s) to group by, e.g., 'country' or ['country', 'region']
+        metrics (tuple): metrics to compute, e.g., [('avg', 'tfp_growth'), ('max', 'real_gdp')]
+        sort: sorting order after aggregation, e.g., [('avg_tfp_growth', -1)]
+        num_records (int): number of results to return
+
+    Example:
+        aggregate_records(group_by='country', metrics=[('avg', 'tfp_growth')], sort=[('avg_tfp_growth', -1)])
     """
     agg = []
 
     if matches:
         agg.append({'$match': mongo_filter(matches)})
-
 
     if group_by:
         if isinstance(group_by, list):
@@ -117,31 +129,18 @@ def aggregate_songs(matches=None, group_by=None, metrics=None, sort=None, fields
         projection = define_outputs(fields)
         agg.append({'$project': projection})
 
-    agg.append({'$limit': num_songs})
+    agg.append({'$limit': num_records})
 
-    songs = db.songs.aggregate(agg)
-    for s in songs:
-        print(s)
-
-def add_region(region_id, name, country_list):
-    """
-    Add a new region to the regions collection.
-
-    Example:
-        add_region("OCEANIA", "Oceania", ["AUS", "NZL"])
-    """
-    regions.insert_one({
-    "_id": region_id,
-    "name": name,
-    "countries": country_list
-})
+    results = yearly_trends.aggregate(agg)
+    for r in results:
+        print(r)
 
 def add_country(country_id, name, region):
     """
     Add a new country to the countries collection.
 
     Example:
-        add_country("AUS", "Australia", "OCEANIA")
+        add_country("AUS", "Australia", "Oceania")
     """
     countries.insert_one({
         "_id": country_id,
@@ -149,8 +148,7 @@ def add_country(country_id, name, region):
         "region": region
     })
 
-    
-def add_characterisitcs(filter_field, filter_val, new_field, char_value):
+def add_characteristic(filter_field, filter_val, new_field, char_value):
     """
     Add or update a field on all documents matching a condition.
 
