@@ -1,13 +1,10 @@
-from pymongo import MongoClient
 import re
 import pandas as pd
+from pymongo import MongoClient
 
-#initialize client
 client = MongoClient('mongodb://localhost:27017/')
 db = client['ted_global']
 yearly_trends = db.yearly_trends
-regions = db.regions
-countries = db.countries
 
 #initialize csv data into database
 def import_csv(csv):
@@ -121,30 +118,3 @@ def aggregate_songs(matches=None, group_by=None, metrics=None, sort=None, fields
     songs = db.songs.aggregate(agg)
     for s in songs:
         print(s)
-
-import_csv('ted_data.csv')
-region_info = [
-    {
-      "_id": "ASIA",
-      "name": "Asia",
-      "countries": ["JPN", "TWN", "CHN"]
-    },
-    {
-      "_id": "EURO",
-      "name": "Europe",
-      "countries": ["DEU", "SWE", "ITA"]
-    },
-    {
-      "_id": "AMER",
-      "name": "Americas",
-      "countries": ["USA", "CAN", "MEX"]
-    }
-]
-regions.insert_many(region_info)
-
-countries_info = [
-    {
-
-    }
-]
-
