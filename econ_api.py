@@ -191,7 +191,7 @@ def add_characteristic(filter_field, filter_val, new_field, char_value):
         {'$set': {new_field: char_value}}
     )
 
-def update_country_profile():
+def add_country_profile(start_year=2010, end_year=2025):
     metrics = ['real_gdp', 'gdp_growth', 'labor_productivity', 'labor_contributions.quantity',
                'labor_contributions.quality', 'capital_contributions.ict', 'capital_contributions.non_ict',
                'capital_contributions.total', 'tfp_growth']
@@ -200,14 +200,17 @@ def update_country_profile():
     for metric in metrics:
         name = f"avg_{metric.replace('.', '_')}"
         pipeline = [
-            { "$group": {
-                "_id": "$country",
-                name: { "$avg": f"${metric}" }
-            }},
+            {"$match":
+                 {"year": {"$gte": start_year, "$lte": end_year}}
+             },
+            {"$group":
+                {"_id": "$country",
+                 name: { "$avg": f"${metric}" }
+             }},
             { "$project": {
                 "_id": 1,
                 name: { "$round": [f"${name}", 2] }
-            }}
+             }}
         ]
         for doc in db.yearly_trends.aggregate(pipeline):
             country = doc["_id"]
@@ -223,37 +226,121 @@ def update_country_profile():
             { "$set": { "data_profile": profile } }
         )
 
-def update_metric_strengths():
+def add_primary_drivers(start_year=2010, end_year=2025):
+    pipeline = [
+        {"$match":
+              { "year": { "$gte": start_year, "$lte": end_year }}
+         },
+        {"$group": {
+            "_id": "$country",
+            "avg_labor_quantity": {"$avg": "$labor_contributions.quantity"},
+            "avg_labor_quality": {"$avg": "$labor_contributions.quality"},
+            "avg_ict_capital": {"$avg": "$capital_contributions.ict"},
+            "avg_non_ict_capital": {"$avg": "$capital_contributions.non_ict"}
+         }}]
+
+    for doc in db.yearly_trends.aggregate(pipeline):
+        country = doc["_id"]
+
+        drivers = {"Labor Quantity": doc["avg_labor_quantity"],
+            "Labor Quality": doc["avg_labor_quality"],
+            "ICT Capital": doc["avg_ict_capital"],
+            "Non-ICT Capital": doc["avg_non_ict_capital"] }
+
+        primary_driver = max(drivers, key=lambda k: drivers[k])
+        weakest_driver = min(drivers, key=lambda k: drivers[k])
+
+        country_id = country_id_map[country]
+        db.countries.update_one(
+            {"_id": country_id },
+            {"$set": {
+                "primary_driver": primary_driver,
+                "weakest_driver": weakest_driver
+            }}
+        )
+
+def add_metric_leaders(start_year=2010, end_year=2025):
     metrics = ['real_gdp', 'gdp_growth', 'labor_productivity', 'labor_contributions.quantity',
                'labor_contributions.quality', 'capital_contributions.ict', 'capital_contributions.non_ict',
                'capital_contributions.total', 'tfp_growth']
-    strengths = {}
+    results = {}
 
     for metric in metrics:
         name = f"avg_{metric.replace('.', '_')}"
         pipeline = [
+            {"$match": {"year": {"$gte": start_year, "$lte": end_year}}},
             {"$group": {
                 "_id": "$country",
                 name: {"$avg": f"${metric}"}
             }},
-            {"$sort": { name: -1 }},
+            {"$sort": {name: -1}},
             {"$limit": 1}
         ]
 
-        # update each country document with its strengths list
         for doc in db.yearly_trends.aggregate(pipeline):
             country = doc["_id"]
-            if country not in strengths:
-                strengths[country] = []
-            strengths[country].append(metric)
+            if country not in results:
+                results[country] = []
+            results[country].append(metric)
 
     # Update each country document with its data_profile
-    for country_name, strength_list in strengths.items():
+    for country_name, strength_list in results.items():
         country_id = country_id_map[country_name]
         db.countries.update_one(
             {"_id": country_id},
-            {"$push": {"strengths": {"$each": strength_list}}}
+            {"$push": {"leading_metrics": {"$each": strength_list}}}
         )
+
+#import_csv('ted_data.csv')
+#add_country_profile()
+#add_primary_drivers()
+#add_metric_leaders()
+
+#print('Updated Profile for China:')
+#pprint(db.countries.find_one({'_id': 'CHN'}), sort_dicts=False)
+#print()
+
+#Query: Find country's with ICT capital as their primary driver
+print('Countries with ICT Capital as Primary Driver:')
+for doc in db.countries.find({"primary_driver": "ICT Capital"},
+                             {"name": 1, "data_profile": 1, "primary_driver": 1, "_id": 0}):
+    pprint(doc, sort_dicts=False)
+print()
+
+#Query: Find every country's economic data in the year 2025, including GDP/TFP growth and primary driver
+print('2025 Regional Economic Data Summary')
+for doc in db.yearly_trends.aggregate([
+    { "$match": { "year": 2025 } },
+    { "$lookup": {
+        "from": "countries",
+        "localField": "country",
+        "foreignField": "name",
+        "as": "profile"
+    }},
+    { "$unwind": "$profile" },
+    { "$project": {
+        "_id": 0,
+        "country": 1,
+        "gdp_growth": 1,
+        "tfp_growth": 1,
+        "primary_driver": "$profile.primary_driver"}}]):
+    pprint(doc, sort_dicts=False)
+print()
+
+#Query: Find the 3 countries that were affect most by COVID in 2020 (by descending GDP growth)
+print('Three Countries Most Affected by COVID')
+for doc in db.yearly_trends.aggregate([
+    { "$match": { "year": 2020 } },
+    { "$sort": { "gdp_growth": 1 } },
+    { "$limit": 3 },
+    {"$project": {
+        "_id": 0,
+        "country": 1,
+        "gdp_growth": 1}}]):
+    pprint(doc, sort_dicts=False)
+
+
+
 
 def plot_metrics(countries, metrics, start_year, end_year):
     """
@@ -306,22 +393,6 @@ def plot_metrics(countries, metrics, start_year, end_year):
     ax.legend()
     plt.tight_layout()
     plt.show()
-
-
-# import_csv('ted_data.csv')
-# print('Profile for China:')
-# print(db.countries.find_one({'_id': 'CHN'}))
-# print()
-
-# update_country_profile()
-# print('Updated Profile for China with Data:')
-# print(db.countries.find_one({'_id': 'CHN'}))
-# print()
-
-# update_metric_strengths()
-# print('Updated Profile for China with Strengths:')
-# print(db.countries.find_one({'_id': 'CHN'}))
-# print()
 
 plot_metrics(
     countries=['United States','China','Italy'],
