@@ -1,6 +1,7 @@
 import re
 import os
 import pandas as pd
+import matplotlib.pyplot as plt
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -254,17 +255,78 @@ def update_metric_strengths():
             {"$push": {"strengths": {"$each": strength_list}}}
         )
 
-import_csv('ted_data.csv')
-print('Profile for China:')
-print(db.countries.find_one({'_id': 'CHN'}))
-print()
+def plot_metrics(countries, metrics, start_year, end_year):
+    """
+    Plot normalized metrics for multiple countries over a year range.
 
-update_country_profile()
-print('Updated Profile for China with Data:')
-print(db.countries.find_one({'_id': 'CHN'}))
-print()
+    Args:
+        countries (list): List of country names e.g. ['Japan', 'Canada']
+        metrics (list): List of metric fields e.g. ['real_gdp', 'tfp_growth']
+        start_year (int): Start year e.g. 1995
+        end_year (int): End year e.g. 2020
 
-update_metric_strengths()
-print('Updated Profile for China with Strengths:')
-print(db.countries.find_one({'_id': 'CHN'}))
-print()
+    Example:
+        plot_metrics(['Japan', 'Canada'], ['real_gdp', 'tfp_growth'], 1995, 2020)
+    """
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for metric in metrics:
+        all_values = []
+        country_data = {}
+
+        # get countries
+        for country in countries:
+            records = list(yearly_trends.find(
+                {'country': country, 'year': {'$gte': start_year, '$lte': end_year}},
+                {'_id': 0, 'year': 1, metric: 1}
+            ).sort('year', 1))
+
+            if records:
+                years = [r['year'] for r in records]
+                values = [r.get(metric, 0) for r in records]
+                country_data[country] = (years, values)
+                all_values.extend(values)
+
+        min_val = min(all_values)
+        max_val = max(all_values)
+
+        # plot for years
+        for country, (years, values) in country_data.items():
+            if max_val != min_val:
+                normalized = [(v - min_val) / (max_val - min_val) for v in values]
+            else:
+                normalized = [0.5] * len(values)
+            ax.plot(years, normalized, marker='o', label=f'{country} - {metric}')
+
+    ax.set_title(f'Normalized Metrics ({start_year}–{end_year})')
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Normalized Value (0-1)')
+    ax.legend()
+    ax.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
+
+# import_csv('ted_data.csv')
+# print('Profile for China:')
+# print(db.countries.find_one({'_id': 'CHN'}))
+# print()
+
+# update_country_profile()
+# print('Updated Profile for China with Data:')
+# print(db.countries.find_one({'_id': 'CHN'}))
+# print()
+
+# update_metric_strengths()
+# print('Updated Profile for China with Strengths:')
+# print(db.countries.find_one({'_id': 'CHN'}))
+# print()
+
+plot_metrics(
+    countries=['United States'],
+    metrics=['real_gdp', 'tfp_growth', 'labor_productivity'],
+    start_year=2019,
+    end_year=2021
+)
