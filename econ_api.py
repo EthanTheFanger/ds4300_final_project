@@ -342,6 +342,28 @@ for doc in db.yearly_trends.aggregate([
 
 
 
+def get_nested(doc, field):
+    keys = field.split('.')
+    val = doc
+    for key in keys:
+        if isinstance(val, dict):
+            val = val.get(key, 0)
+        else:
+            return 0
+    return val
+
+
+def get_nested(doc, field):
+    keys = field.split('.')
+    val = doc
+    for key in keys:
+        if isinstance(val, dict):
+            val = val.get(key, 0)
+        else:
+            return 0
+    return val
+
+
 def plot_metrics(countries, metrics, start_year, end_year):
     """
     Plot normalized metrics for multiple countries over a year range.
@@ -371,7 +393,7 @@ def plot_metrics(countries, metrics, start_year, end_year):
 
             if records:
                 years = [r['year'] for r in records]
-                values = [r.get(metric, 0) for r in records]
+                values = [get_nested(r, metric) for r in records]
                 country_data[country] = (years, values)
                 all_values.extend(values)
         
@@ -385,18 +407,76 @@ def plot_metrics(countries, metrics, start_year, end_year):
                 normalized = [(v - min_val) / (max_val - min_val) for v in values]
             else:
                 normalized = [0.5] * len(values)
-            ax.plot(years, normalized, label=f'{country} - {metric}')
-
-    ax.set_title(f'Normalized Metrics ({start_year}–{end_year})')
+            line, = ax.plot(years, normalized)
+            ax.annotate(
+                f'{country} - {metric}',
+                xy=(years[-1], normalized[-1]),
+                xytext=(5, 0),
+                textcoords='offset points',
+                va='center',
+                fontsize=8,
+                color=line.get_color()
+            )
+    ax.set_title(f'Normalized {" ".join(metrics)} ({start_year}–{end_year})')
     ax.set_xlabel('Year')
     ax.set_ylabel('Normalized Value (0-1)')
     ax.legend()
     plt.tight_layout()
     plt.show()
 
+
+# import_csv('ted_data.csv')
+# print('Profile for China:')
+# print(db.countries.find_one({'_id': 'CHN'}))
+# print()
+
+# update_country_profile()
+# print('Updated Profile for China with Data:')
+# print(db.countries.find_one({'_id': 'CHN'}))
+# print()
+
+# update_metric_strengths()
+# print('Updated Profile for China with Strengths:')
+# print(db.countries.find_one({'_id': 'CHN'}))
+# print()
 plot_metrics(
-    countries=['United States','China','Italy'],
+    countries=['China', 'United States', 'Germany', 'Japan', 'Taiwan', 'Italy', 'Sweden', 'Canada', 'Mexico'],
+    metrics=['real_gdp'],
+    start_year=1990,
+    end_year=2025
+)
+
+plot_metrics(
+    countries=['China', 'United States', 'Germany', 'Japan', 'Taiwan', 'Italy', 'Sweden', 'Canada', 'Mexico'],
+    metrics=['real_gdp'],
+    start_year=1990,
+    end_year=2025
+)
+
+plot_metrics(
+    countries=['China', 'United States', 'Germany'],
     metrics=['tfp_growth'],
     start_year=1990,
+    end_year=2025
+)
+
+plot_metrics(
+    countries=['China','United States','Germany'],
+    metrics=['labor_contributions.quantity'],
+    start_year=2015,
+    end_year=2025
+)
+
+plot_metrics(
+    countries=['China', 'United States', 'Germany'],
+    metrics=['tfp_growth'],
+    start_year=2015,
+    end_year=2025
+)
+
+plot_metrics(
+    countries=['Italy', 'Canada', 'Germany'],
+    metrics=['tfp_growth'],
+    start_year=2015,
     end_year=2025
 )
